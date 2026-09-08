@@ -933,13 +933,13 @@ namespace $(RootNamespace)
 	[global::System.CodeDom.Compiler.GeneratedCode(&quot;Purview.DotNetProjectSdk&quot;, &quot;$(PackageVersion)&quot;)]
 	static partial class AssemblyInfo
 	{
-		public const string RootNamespace = &quot;$(RootNamespace)&quot;%3B
-		public const string AssemblyName = &quot;$(AssemblyName)&quot;%3B
-		public const string AssemblyTitle = &quot;$(AssemblyTitle)&quot;%3B
-		public const string AssemblyProduct = &quot;$(AssemblyProduct)&quot;%3B
-		public const string Version = &quot;$(Version)&quot;%3B
-		public const string Company = &quot;$(Company)&quot;%3B
-		public const string Copyright = &quot;$(Copyright)&quot;%3B
+		public const string RootNamespace = &quot;$([MSBuild]::Escape('$(RootNamespace)'))&quot;%3B
+		public const string AssemblyName = &quot;$([MSBuild]::Escape('$(AssemblyName)'))&quot;%3B
+		public const string AssemblyTitle = &quot;$([MSBuild]::Escape('$(AssemblyTitle)'))&quot;%3B
+		public const string AssemblyProduct = &quot;$([MSBuild]::Escape('$(AssemblyProduct)'))&quot;%3B
+		public const string Version = &quot;$([MSBuild]::Escape('$(Version)'))&quot;%3B
+		public const string Company = &quot;$([MSBuild]::Escape('$(Company)'))&quot;%3B
+		public const string Copyright = &quot;$([MSBuild]::Escape('$(Copyright)'))&quot;%3B
 		public const int Year = $(CurrentYear)%3B
 
 		public static string GetFriendlyName()
@@ -959,7 +959,7 @@ namespace $(RootNamespace)
 				}
 			}
 
-			return &quot;$(MSBuildProjectName)&quot;%3B
+			return &quot;$([MSBuild]::Escape('$(MSBuildProjectName)'))&quot;%3B
 		}
 	}
 }

@@ -13,7 +13,6 @@ jobs:
     name: Build, lint & package
     uses: purview-dev/build/.github/workflows/purview-build.yml@main
     with:
-      build-version: "0.2.1"
       run-tests: false
     secrets: inherit
 
@@ -28,7 +27,6 @@ jobs:
           - DotNetProjectSdk.IntegrationTests.csproj
     uses: purview-dev/build/.github/workflows/purview-build.yml@main
     with:
-      build-version: "0.2.1"
       run-lint: false
       run-pack: false
       validate-pack: false
