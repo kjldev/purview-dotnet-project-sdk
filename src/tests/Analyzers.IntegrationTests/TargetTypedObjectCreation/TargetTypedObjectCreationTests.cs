@@ -73,6 +73,108 @@ public sealed class TargetTypedObjectCreationTests
 		await Assert.That(fixedSource).IsEqualTo("Widget value = new();");
 	}
 
+	[Test]
+	public async Task CodeFix_ObjectCreationWithArguments_UsesExplicitTypeAndTargetTypedNew(
+		CancellationToken cancellationToken
+	)
+	{
+		// Arrange
+		const string source = """
+			using System.Text;
+
+			var sb = new StringBuilder("hello");
+			""";
+		const string expected = """
+			using System.Text;
+
+			StringBuilder sb = new("hello");
+			""";
+		var document = CreateDocument(source);
+		var diagnostic = (await GetDiagnosticsAsync(document, cancellationToken)).Single();
+		var provider = new TargetTypedObjectCreationCodeFixProvider();
+		var actions = new List<CodeAction>();
+		var context = new CodeFixContext(document, diagnostic, (action, _) => actions.Add(action), cancellationToken);
+
+		// Act
+		await provider.RegisterCodeFixesAsync(context);
+		var operations = await actions.Single().GetOperationsAsync(cancellationToken);
+		var changedDocument = ((ApplyChangesOperation)operations.Single()).ChangedSolution.GetDocument(document.Id)!;
+		var fixedSource = (await changedDocument.GetTextAsync(cancellationToken)).ToString();
+
+		// Assert
+		await Assert.That(fixedSource).IsEqualTo(expected);
+	}
+
+	[Test]
+	public async Task CodeFix_ObjectCreationWithInitializer_UsesExplicitTypeAndTargetTypedNew(
+		CancellationToken cancellationToken
+	)
+	{
+		// Arrange
+		const string source = """
+			class Widget
+			{
+				public int Id { get; set; }
+			}
+
+			var widget = new Widget { Id = 1 };
+			""";
+		const string expected = """
+			class Widget
+			{
+				public int Id { get; set; }
+			}
+
+			Widget widget = new() { Id = 1 };
+			""";
+		var document = CreateDocument(source);
+		var diagnostic = (await GetDiagnosticsAsync(document, cancellationToken)).Single();
+		var provider = new TargetTypedObjectCreationCodeFixProvider();
+		var actions = new List<CodeAction>();
+		var context = new CodeFixContext(document, diagnostic, (action, _) => actions.Add(action), cancellationToken);
+
+		// Act
+		await provider.RegisterCodeFixesAsync(context);
+		var operations = await actions.Single().GetOperationsAsync(cancellationToken);
+		var changedDocument = ((ApplyChangesOperation)operations.Single()).ChangedSolution.GetDocument(document.Id)!;
+		var fixedSource = (await changedDocument.GetTextAsync(cancellationToken)).ToString();
+
+		// Assert
+		await Assert.That(fixedSource).IsEqualTo(expected);
+	}
+
+	[Test]
+	public async Task CodeFix_UsingVarWithObjectCreation_UsesExplicitTypeAndTargetTypedNew(
+		CancellationToken cancellationToken
+	)
+	{
+		// Arrange
+		const string source = """
+			using System.IO;
+
+			using var reader = new StreamReader(path);
+			""";
+		const string expected = """
+			using System.IO;
+
+			using StreamReader reader = new(path);
+			""";
+		var document = CreateDocument(source);
+		var diagnostic = (await GetDiagnosticsAsync(document, cancellationToken)).Single();
+		var provider = new TargetTypedObjectCreationCodeFixProvider();
+		var actions = new List<CodeAction>();
+		var context = new CodeFixContext(document, diagnostic, (action, _) => actions.Add(action), cancellationToken);
+
+		// Act
+		await provider.RegisterCodeFixesAsync(context);
+		var operations = await actions.Single().GetOperationsAsync(cancellationToken);
+		var changedDocument = ((ApplyChangesOperation)operations.Single()).ChangedSolution.GetDocument(document.Id)!;
+		var fixedSource = (await changedDocument.GetTextAsync(cancellationToken)).ToString();
+
+		// Assert
+		await Assert.That(fixedSource).IsEqualTo(expected);
+	}
+
 	static Document CreateDocument(string source)
 	{
 		using var workspace = new AdhocWorkspace();

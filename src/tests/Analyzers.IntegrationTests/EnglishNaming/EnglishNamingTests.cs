@@ -178,6 +178,48 @@ public sealed class EnglishNamingTests
 		await Assert.That(fixedSource).IsEqualTo(after);
 	}
 
+	[Test]
+	public async Task CodeFix_TypeNamedOpenApi_IsRenamed_AcrossMultipleDocuments(CancellationToken cancellationToken)
+	{
+		const string declarationSource = "class OpenApi\n{\n}\n";
+		const string consumerSource = "class Consumer\n{\n\tOpenApi value = new OpenApi();\n}\n";
+
+		const string expectedDeclaration = "class OpenAPI\n{\n}\n";
+		const string expectedConsumer = "class Consumer\n{\n\tOpenAPI value = new OpenAPI();\n}\n";
+
+		using var workspace = new AdhocWorkspace();
+		var solution = CreateMultiDocumentSolution(
+			workspace,
+			declarationSource,
+			consumerSource,
+			out var declarationDocumentId,
+			out var consumerDocumentId
+		);
+		var declarationDocument = solution.GetDocument(declarationDocumentId)!;
+
+		var diagnostic = (await GetDiagnosticsAsync(declarationDocument, cancellationToken)).Single();
+		var provider = new EnglishNamingCodeFixProvider();
+		var actions = new List<CodeAction>();
+		var context = new CodeFixContext(
+			declarationDocument,
+			diagnostic,
+			(action, _) => actions.Add(action),
+			cancellationToken
+		);
+
+		await provider.RegisterCodeFixesAsync(context);
+		var operations = await actions.Single().GetOperationsAsync(cancellationToken);
+		var changedSolution = ((ApplyChangesOperation)operations.Single()).ChangedSolution;
+
+		var fixedDeclaration = await changedSolution
+			.GetDocument(declarationDocumentId)!
+			.GetTextAsync(cancellationToken);
+		var fixedConsumer = await changedSolution.GetDocument(consumerDocumentId)!.GetTextAsync(cancellationToken);
+
+		await Assert.That(fixedDeclaration.ToString()).IsEqualTo(expectedDeclaration);
+		await Assert.That(fixedConsumer.ToString()).IsEqualTo(expectedConsumer);
+	}
+
 	static async Task<ImmutableArray<Diagnostic>> GetDiagnosticsAsync(
 		string source,
 		CancellationToken cancellationToken
@@ -219,5 +261,34 @@ public sealed class EnglishNamingTests
 			.CurrentSolution.AddProject(project)
 			.AddDocument(documentId, "Test.cs", SourceText.From(source), filePath: filePath ?? "Test.cs")
 			.GetDocument(documentId)!;
+	}
+
+	static Solution CreateMultiDocumentSolution(
+		AdhocWorkspace workspace,
+		string declarationSource,
+		string consumerSource,
+		out DocumentId declarationDocumentId,
+		out DocumentId consumerDocumentId
+	)
+	{
+		var projectId = ProjectId.CreateNewId();
+		var project = ProjectInfo
+			.Create(
+				projectId,
+				VersionStamp.Create(),
+				"TestProject",
+				"TestProject",
+				LanguageNames.CSharp,
+				parseOptions: CSharpParseOptions.Default,
+				compilationOptions: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
+			)
+			.WithMetadataReferences(AnalyzerTestInfrastructure.BuildBclReferences());
+
+		declarationDocumentId = DocumentId.CreateNewId(projectId);
+		consumerDocumentId = DocumentId.CreateNewId(projectId);
+		return workspace
+			.CurrentSolution.AddProject(project)
+			.AddDocument(declarationDocumentId, "OpenApi.cs", SourceText.From(declarationSource))
+			.AddDocument(consumerDocumentId, "Consumer.cs", SourceText.From(consumerSource));
 	}
 }
