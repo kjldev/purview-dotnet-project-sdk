@@ -2660,6 +2660,8 @@ dotnet_diagnostic.IDE0053.severity = none
 dotnet_diagnostic.IDE0300.severity = none
 dotnet_diagnostic.RCS1021.severity = none
 dotnet_diagnostic.RCS1205.severity = none
+# PDS0004: Use correct acronym capitalization
+dotnet_diagnostic.PDS0004.severity = none
 
 [**/Extensions/**.{cs,vb}]
 dotnet_diagnostic.IDE0130.severity = none
