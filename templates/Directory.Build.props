@@ -22,7 +22,7 @@
 	-->
 	<PropertyGroup>
 		<!-- Set your default namespace prefix here (required by the SDK) -->
-		<NamespacePrefix>YourCompany</NamespacePrefix>
+		<NamespacePrefix>YourCompany.ProductName</NamespacePrefix>
 	</PropertyGroup>
 
 	<Import Sdk="Purview.DotNetProjectSdk" Project="Sdk.props" />

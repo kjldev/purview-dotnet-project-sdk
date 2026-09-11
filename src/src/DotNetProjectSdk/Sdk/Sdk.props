@@ -481,17 +481,30 @@
 	     Analyzer assets inside an MSBuild SDK package are not automatically added
 	     to the compiler by NuGet, so add the SDK's analyzer assembly explicitly
 	     (this is why the shipped rules show up in both command-line builds and
-	     Visual Studio). Only the analyzer assembly is listed here: the code-fix
-	     assembly ships beside it in analyzers/dotnet/cs for the IDE to discover,
-	     but is intentionally not an Analyzer item so csc never tries to load its
-	     Microsoft.CodeAnalysis.Workspaces dependency. The Exists() guard keeps
-	     the in-repo bootstrap (which has no analyzers/dotnet/cs folder) inert.
+	     Visual Studio).
+
+	     The code-fix assembly ships beside the analyzer in analyzers/dotnet/cs,
+	     but the IDE discovers project-level code fixes only from analyzer
+	     references (Roslyn's CodeFixService keys on Project.AnalyzerReferences),
+	     so it must ALSO be an Analyzer item for the fixes to appear in Visual
+	     Studio. It can never be an unconditional Analyzer item: CodeFixProvider
+	     and [ExportCodeFixProvider] live in Microsoft.CodeAnalysis.Workspaces,
+	     which the command-line compiler cannot resolve (the SDK's Roslyn folder
+	     ships only the compiler assemblies), so csc would emit CS8032 for every
+	     build. Gating on BuildingInsideVisualStudio restricts the code-fix
+	     assembly to Visual Studio, where Workspaces is always available. The
+	     Exists() guard keeps the in-repo bootstrap (which has no
+	     analyzers/dotnet/cs folder) inert.
 	     ===================================================================== -->
 	<ItemGroup
 		Label="SDK-Shipped Analyzers"
 		Condition="'$(IsCSharpProject)' == 'true' AND Exists('$(MSBuildThisFileDirectory)../analyzers/dotnet/cs/Purview.DotNetProjectSdk.Analyzers.dll')"
 	>
 		<Analyzer Include="$(MSBuildThisFileDirectory)../analyzers/dotnet/cs/Purview.DotNetProjectSdk.Analyzers.dll" />
+		<Analyzer
+			Include="$(MSBuildThisFileDirectory)../analyzers/dotnet/cs/Purview.DotNetProjectSdk.CodeFixers.dll"
+			Condition="'$(BuildingInsideVisualStudio)' == 'true'"
+		/>
 	</ItemGroup>
 
 	<!-- Default namespace from logical project identity -->

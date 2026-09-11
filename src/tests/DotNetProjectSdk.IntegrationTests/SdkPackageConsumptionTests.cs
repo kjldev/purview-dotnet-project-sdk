@@ -289,6 +289,70 @@ public sealed class SdkPackageConsumptionTests
 		}
 	}
 
+	[Test]
+	[NotInParallel]
+	public async Task PackedSdk_ExposesCodeFixAssemblyOnlyInsideVisualStudio(CancellationToken cancellationToken)
+	{
+		var tempRoot = Path.Combine(Path.GetTempPath(), $"PurviewSdkCodeFixDiscovery-{Guid.NewGuid():N}");
+		var feedDirectory = Path.Combine(tempRoot, "feed");
+		var consumerDirectory = Path.Combine(tempRoot, "consumer");
+		var consumerSrcDirectory = Path.Combine(consumerDirectory, "src");
+
+		Directory.CreateDirectory(feedDirectory);
+		Directory.CreateDirectory(consumerDirectory);
+		Directory.CreateDirectory(consumerSrcDirectory);
+
+		try
+		{
+			var packageVersion = await PackSdkAsync(feedDirectory, cancellationToken);
+			await SetupConsumerProjectAsync(consumerDirectory, consumerSrcDirectory, cancellationToken);
+			await WriteConfigurationFilesAsync(
+				consumerDirectory,
+				consumerSrcDirectory,
+				feedDirectory,
+				packageVersion,
+				cancellationToken
+			);
+
+			var cliAnalyzerPaths = await GetAnalyzerItemPathsAsync(
+				consumerDirectory,
+				extraMsbuildArgs: "",
+				cancellationToken
+			);
+			await Assert
+				.That(
+					cliAnalyzerPaths.Any(path =>
+						path.EndsWith("Purview.DotNetProjectSdk.CodeFixers.dll", StringComparison.OrdinalIgnoreCase)
+					)
+				)
+				.IsFalse()
+				.Because(
+					$"The code-fix assembly must not be an Analyzer item in command-line builds (its Workspaces dependency would emit CS8032).{Environment.NewLine}Analyzers: {string.Join(", ", cliAnalyzerPaths)}"
+				);
+
+			var vsAnalyzerPaths = await GetAnalyzerItemPathsAsync(
+				consumerDirectory,
+				extraMsbuildArgs: "-p:BuildingInsideVisualStudio=true",
+				cancellationToken
+			);
+			await Assert
+				.That(
+					vsAnalyzerPaths.Any(path =>
+						path.EndsWith("Purview.DotNetProjectSdk.CodeFixers.dll", StringComparison.OrdinalIgnoreCase)
+					)
+				)
+				.IsTrue()
+				.Because(
+					$"The code-fix assembly must be an Analyzer item inside Visual Studio so its code fixes are discovered.{Environment.NewLine}Analyzers: {string.Join(", ", vsAnalyzerPaths)}"
+				);
+		}
+		finally
+		{
+			if (Directory.Exists(tempRoot))
+				Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
 	static async Task VerifyPackageContainsAnalyzersAsync(
 		string feedDirectory,
 		string packageVersion,
@@ -339,29 +403,7 @@ public sealed class SdkPackageConsumptionTests
 
 	static async Task VerifyAnalyzerItemExposedAsync(string consumerDirectory, CancellationToken cancellationToken)
 	{
-		var nugetConfigPath = Path.Combine(consumerDirectory, "NuGet.Config");
-
-		var (code, stdOut, stdErr) = await RunProcessAsync(
-			"dotnet",
-			$"msbuild \"{Path.Combine("src", "Proof.LibTest", "Proof.LibTest.csproj")}\" -nologo -noconlog -p:RestoreConfigFile=\"{nugetConfigPath}\" -getItem:Analyzer -p:CentralPackageFloatingVersionsEnabled=true",
-			consumerDirectory,
-			cancellationToken
-		);
-		await Assert.That(code).IsEqualTo(0).Because(TestHelpers.GenerateError(stdOut, stdErr));
-
-		var evaluationJsonStart = stdOut.IndexOf('{', StringComparison.Ordinal);
-		await Assert.That(evaluationJsonStart >= 0).IsTrue();
-		var evaluationJson = stdOut[evaluationJsonStart..];
-
-		using var doc = JsonDocument.Parse(evaluationJson);
-		var analyzerPaths = doc
-			.RootElement.GetProperty("Items")
-			.GetProperty("Analyzer")
-			.EnumerateArray()
-			.Select(item => item.GetProperty("Identity").GetString())
-			.Where(path => !string.IsNullOrWhiteSpace(path))
-			.Select(path => Path.GetFullPath(path!))
-			.ToArray();
+		var analyzerPaths = await GetAnalyzerItemPathsAsync(consumerDirectory, extraMsbuildArgs: "", cancellationToken);
 
 		await Assert
 			.That(
@@ -373,6 +415,37 @@ public sealed class SdkPackageConsumptionTests
 			.Because(
 				$"The SDK analyzer must be exposed as an Analyzer item to the consumer project.{Environment.NewLine}Analyzers: {string.Join(", ", analyzerPaths)}"
 			);
+	}
+
+	static async Task<string[]> GetAnalyzerItemPathsAsync(
+		string consumerDirectory,
+		string extraMsbuildArgs,
+		CancellationToken cancellationToken
+	)
+	{
+		var nugetConfigPath = Path.Combine(consumerDirectory, "NuGet.Config");
+
+		var (code, stdOut, stdErr) = await RunProcessAsync(
+			"dotnet",
+			$"msbuild \"{Path.Combine("src", "Proof.LibTest", "Proof.LibTest.csproj")}\" -nologo -noconlog -p:RestoreConfigFile=\"{nugetConfigPath}\" -getItem:Analyzer -p:CentralPackageFloatingVersionsEnabled=true {extraMsbuildArgs}",
+			consumerDirectory,
+			cancellationToken
+		);
+		await Assert.That(code).IsEqualTo(0).Because(TestHelpers.GenerateError(stdOut, stdErr));
+
+		var evaluationJsonStart = stdOut.IndexOf('{', StringComparison.Ordinal);
+		await Assert.That(evaluationJsonStart >= 0).IsTrue();
+		var evaluationJson = stdOut[evaluationJsonStart..];
+
+		using var doc = JsonDocument.Parse(evaluationJson);
+		return doc
+			.RootElement.GetProperty("Items")
+			.GetProperty("Analyzer")
+			.EnumerateArray()
+			.Select(item => item.GetProperty("Identity").GetString())
+			.Where(path => !string.IsNullOrWhiteSpace(path))
+			.Select(path => Path.GetFullPath(path!))
+			.ToArray();
 	}
 
 	static async Task VerifyPds0003WarningOnBuildAsync(string consumerDirectory, CancellationToken cancellationToken)
