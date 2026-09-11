@@ -228,7 +228,7 @@
 			<Description>Disables generation of the AssemblyInfo helper class in intermediate output.</Description>
 		</CompilerVisibleProperty>
 		<CompilerVisibleProperty Include="EnableAssemblyNameGeneration">
-			<Description>When true (default), the SDK derives AssemblyName from RootNamespace and PackageId from RootNamespace. Set to false to fall back to the standard .NET behaviour (project name).</Description>
+			<Description>When true (default), the SDK derives AssemblyName and PackageId from RootNamespace (or from the full logical project name when suffix-stripping removed a segment, e.g. Shared/ServiceDefaults). Set to false to fall back to the standard .NET behaviour (project name).</Description>
 		</CompilerVisibleProperty>
 		<CompilerVisibleProperty Include="DisableAutoInternalsVisibleTo">
 			<Description>Disables automatic InternalsVisibleTo generation for test and shared testing projects.</Description>
@@ -476,6 +476,24 @@
 		/>
 	</ItemGroup>
 
+	<!-- =====================================================================
+	     SDK-SHIPPED ANALYZERS
+	     Analyzer assets inside an MSBuild SDK package are not automatically added
+	     to the compiler by NuGet, so add the SDK's analyzer assembly explicitly
+	     (this is why the shipped rules show up in both command-line builds and
+	     Visual Studio). Only the analyzer assembly is listed here: the code-fix
+	     assembly ships beside it in analyzers/dotnet/cs for the IDE to discover,
+	     but is intentionally not an Analyzer item so csc never tries to load its
+	     Microsoft.CodeAnalysis.Workspaces dependency. The Exists() guard keeps
+	     the in-repo bootstrap (which has no analyzers/dotnet/cs folder) inert.
+	     ===================================================================== -->
+	<ItemGroup
+		Label="SDK-Shipped Analyzers"
+		Condition="'$(IsCSharpProject)' == 'true' AND Exists('$(MSBuildThisFileDirectory)../analyzers/dotnet/cs/Purview.DotNetProjectSdk.Analyzers.dll')"
+	>
+		<Analyzer Include="$(MSBuildThisFileDirectory)../analyzers/dotnet/cs/Purview.DotNetProjectSdk.Analyzers.dll" />
+	</ItemGroup>
+
 	<!-- Default namespace from logical project identity -->
 	<PropertyGroup>
 		<_PurviewSharedProjectRemovePattern>$([System.Text.RegularExpressions.Regex]::Replace('$(_SharedProjectNames)', '^;|;$', '').Replace(';', '|'))</_PurviewSharedProjectRemovePattern>
@@ -484,6 +502,11 @@
 		<RootNamespace
 			Condition="('$(RootNamespace)' == '' OR '$(RootNamespace)' == '$(MSBuildProjectName)') AND '$(PurviewLogicalProjectName)' != ''"
 			>$(PurviewLogicalProjectName)</RootNamespace>
+		<!-- Captures the RootNamespace before suffix stripping. It equals PurviewLogicalProjectName
+		     only when RootNamespace was not explicitly overridden before the SDK import, which lets
+		     the assembly/package defaults re-append a stripped suffix without breaking explicit
+		     RootNamespace overrides. -->
+		<_PurviewUnstrippedRootNamespace>$(RootNamespace)</_PurviewUnstrippedRootNamespace>
 		<RootNamespace Condition="'$(_PurviewNamespaceRemovePattern)' != ''"
 			>$([System.Text.RegularExpressions.Regex]::Replace('$(RootNamespace)', '\.(?:$(_PurviewNamespaceRemovePattern))(?=\.|$)', ''))</RootNamespace>
 		<RootNamespace Condition="'$(TestingType)' != ''"
@@ -507,17 +530,34 @@
 		Label="Assembly Name and Package ID Generation"
 		Condition="'$(IsCSharpProject)' == 'true' AND '$(EnableAssemblyNameGeneration)' != 'false'"
 	>
-		<!-- Non-test projects: AssemblyName defaults to the fully-evaluated RootNamespace. -->
+		<!-- True only when RootNamespace came from the logical project name AND suffix-stripping removed
+		     a segment, so the assembly/package identity re-appends it. Explicit RootNamespace overrides
+		     leave _PurviewUseLogicalProjectName unset and keep following RootNamespace. -->
+		<_PurviewUseLogicalProjectName
+			Condition="'$(PurviewLogicalProjectName)' != '' AND '$(RootNamespace)' != '$(PurviewLogicalProjectName)' AND '$(_PurviewUnstrippedRootNamespace)' == '$(PurviewLogicalProjectName)'"
+			>true</_PurviewUseLogicalProjectName>
+		<!-- Non-test projects: when suffix-stripping removed a segment of the logical project name
+		     (Shared, Core, EF, ServiceDefaults, ...), use the full logical project name so assemblies
+		     stay distinct (Purview.SampleApp.Shared vs Purview.SampleApp.ServiceDefaults rather than
+		     two Purview.SampleApp assemblies). -->
 		<AssemblyName
-			Condition="('$(AssemblyName)' == '' OR '$(AssemblyName)' == '$(MSBuildProjectName)') AND '$(RootNamespace)' != '' AND '$(IsTestProject)' != 'true' AND '$(IsSharedTestingProject)' != 'true'"
+			Condition="('$(AssemblyName)' == '' OR '$(AssemblyName)' == '$(MSBuildProjectName)') AND '$(_PurviewUseLogicalProjectName)' == 'true' AND '$(IsTestProject)' != 'true' AND '$(IsSharedTestingProject)' != 'true'"
+			>$(PurviewLogicalProjectName)</AssemblyName>
+		<!-- Otherwise: default to the fully-evaluated RootNamespace (unchanged behaviour). -->
+		<AssemblyName
+			Condition="('$(AssemblyName)' == '' OR '$(AssemblyName)' == '$(MSBuildProjectName)') AND '$(_PurviewUseLogicalProjectName)' != 'true' AND '$(RootNamespace)' != '' AND '$(IsTestProject)' != 'true' AND '$(IsSharedTestingProject)' != 'true'"
 			>$(RootNamespace)</AssemblyName>
 		<!-- Test/shared-testing projects: RootNamespace strips the test suffix, so derive from the
 		     logical project name to keep test assemblies distinct from the source assembly. -->
 		<AssemblyName
 			Condition="('$(AssemblyName)' == '' OR '$(AssemblyName)' == '$(MSBuildProjectName)') AND '$(PurviewLogicalProjectName)' != '' AND ('$(IsTestProject)' == 'true' OR '$(IsSharedTestingProject)' == 'true')"
 			>$(PurviewLogicalProjectName)</AssemblyName>
+		<!-- PackageId follows the same rule as AssemblyName so package identity stays in sync. -->
 		<PackageId
-			Condition="('$(PackageId)' == '' OR '$(PackageId)' == '$(MSBuildProjectName)') AND '$(RootNamespace)' != '' AND '$(IsTestProject)' != 'true' AND '$(IsSharedTestingProject)' != 'true'"
+			Condition="('$(PackageId)' == '' OR '$(PackageId)' == '$(MSBuildProjectName)') AND '$(_PurviewUseLogicalProjectName)' == 'true' AND '$(IsTestProject)' != 'true' AND '$(IsSharedTestingProject)' != 'true'"
+			>$(PurviewLogicalProjectName)</PackageId>
+		<PackageId
+			Condition="('$(PackageId)' == '' OR '$(PackageId)' == '$(MSBuildProjectName)') AND '$(_PurviewUseLogicalProjectName)' != 'true' AND '$(RootNamespace)' != '' AND '$(IsTestProject)' != 'true' AND '$(IsSharedTestingProject)' != 'true'"
 			>$(RootNamespace)</PackageId>
 		<PackageId
 			Condition="('$(PackageId)' == '' OR '$(PackageId)' == '$(MSBuildProjectName)') AND '$(PurviewLogicalProjectName)' != '' AND ('$(IsTestProject)' == 'true' OR '$(IsSharedTestingProject)' == 'true')"

@@ -1581,6 +1581,7 @@ dotnet_diagnostic.IDE2006.severity = warning
 dotnet_diagnostic.IDE0007.severity = warning
 dotnet_diagnostic.IDE0008.severity = none
 dotnet_diagnostic.PDS0003.severity = warning
+dotnet_diagnostic.PDS0004.severity = warning
 
 # Usage Rules (CA1801, CA1816, CA2200-CA2267)
 # Usage rules support proper usage of .NET

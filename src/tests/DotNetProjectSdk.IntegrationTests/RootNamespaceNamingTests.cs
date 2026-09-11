@@ -179,4 +179,77 @@ public sealed class RootNamespaceNamingTests
 		await Assert.That(props["AssemblyName"]).IsEqualTo("SystemTextJson");
 		await Assert.That(props["PackageId"]).IsEqualTo("SystemTextJson");
 	}
+
+	[Test]
+	public async Task SharedAndServiceDefaultsProjects_GetDistinctAssemblyNames(CancellationToken cancellationToken)
+	{
+		// Regression: a Shared.csproj and a ServiceDefaults.csproj in the same repo previously both
+		// resolved to the stripped RootNamespace (Purview.ChangeOps). Each must keep its full logical
+		// project name as the assembly/package identity.
+		using var shared = await ProjectHarness.CreateAsync(
+			"Shared",
+			namespacePrefix: "Purview.ChangeOps",
+			cancellationToken: cancellationToken
+		);
+		using var serviceDefaults = await ProjectHarness.CreateAsync(
+			"ServiceDefaults",
+			namespacePrefix: "Purview.ChangeOps",
+			cancellationToken: cancellationToken
+		);
+
+		var sharedProps = await shared.GetPropertiesAsync(
+			cancellationToken,
+			"AssemblyName",
+			"PackageId",
+			"RootNamespace"
+		);
+		var serviceDefaultsProps = await serviceDefaults.GetPropertiesAsync(
+			cancellationToken,
+			"AssemblyName",
+			"PackageId",
+			"RootNamespace"
+		);
+
+		await Assert.That(sharedProps["RootNamespace"]).IsEqualTo("Purview.ChangeOps");
+		await Assert.That(sharedProps["AssemblyName"]).IsEqualTo("Purview.ChangeOps.Shared");
+		await Assert.That(sharedProps["PackageId"]).IsEqualTo("Purview.ChangeOps.Shared");
+
+		await Assert.That(serviceDefaultsProps["RootNamespace"]).IsEqualTo("Purview.ChangeOps");
+		await Assert.That(serviceDefaultsProps["AssemblyName"]).IsEqualTo("Purview.ChangeOps.ServiceDefaults");
+		await Assert.That(serviceDefaultsProps["PackageId"]).IsEqualTo("Purview.ChangeOps.ServiceDefaults");
+	}
+
+	[Test]
+	public async Task MidNameSuffix_AssemblyKeepsFullLogicalName(CancellationToken cancellationToken)
+	{
+		// Generalised rule: any stripped suffix (mid-name here) keeps the full logical project name.
+		using var h = await ProjectHarness.CreateAsync(
+			"Core.Infrastructure",
+			namespacePrefix: "Acme",
+			cancellationToken: cancellationToken
+		);
+
+		var props = await h.GetPropertiesAsync(cancellationToken, "AssemblyName", "RootNamespace");
+
+		await Assert.That(props["RootNamespace"]).IsEqualTo("Acme.Infrastructure");
+		await Assert.That(props["AssemblyName"]).IsEqualTo("Acme.Core.Infrastructure");
+	}
+
+	[Test]
+	public async Task ExplicitRootNamespace_StillWins_ForAssemblyIdentity(CancellationToken cancellationToken)
+	{
+		// When RootNamespace is explicitly overridden before the SDK import, AssemblyName/PackageId
+		// follow that override rather than the stripped-suffix logical name.
+		using var h = await ProjectHarness
+			.For("Shared")
+			.WithNamespacePrefix("Purview.ChangeOps")
+			.WithPreImportProperty("RootNamespace", "Custom.RootNamespace")
+			.BuildAsync(cancellationToken);
+
+		var props = await h.GetPropertiesAsync(cancellationToken, "AssemblyName", "RootNamespace", "PackageId");
+
+		await Assert.That(props["RootNamespace"]).IsEqualTo("Custom.RootNamespace");
+		await Assert.That(props["AssemblyName"]).IsEqualTo("Custom.RootNamespace");
+		await Assert.That(props["PackageId"]).IsEqualTo("Custom.RootNamespace");
+	}
 }

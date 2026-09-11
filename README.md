@@ -472,9 +472,39 @@ Outside this scope, normal `IDE0130` behaviour remains unchanged.
 
 ---
 
+## SDK-shipped analyzers
+
+The package ships `Purview.DotNetProjectSdk.Analyzers.dll` (plus a separate code-fix assembly for the IDE)
+and adds the analyzer to every C# project as an `<Analyzer>` item, so the rules surface in both
+command-line builds and Visual Studio.
+
+| Rule | Category | Severity | Description |
+| -- | -- | -- | -- |
+| `PDS0001` | (suppressor) | — | Suppresses `CS1591` for `EditorBrowsable(Never)` members |
+| `PDS0002` | Naming | Warning | Files under a project-root `Extensions/` folder reset their namespace |
+| `PDS0003` | Style | Warning | Prefer an explicit type with target-typed `new()` over `var` |
+| `PDS0004` | Naming | Warning | Use correct acronym capitalization (`Api` → `API`) |
+
+`PDS0004` deliberately overrides .NET's naming guidance (which recommends spellings like `Api`, `Xml`,
+and `Http`). By default the acronym-like segments `Http`, `Xml`, `Json`, `Id`, and `Sdk` are exempt.
+The lists are customisable per repo in `.editorconfig` (both options replace the shipped default when set):
+
+- `dotnet_analyzer_configuration.pds0004.allowed_words` — semicolon-separated segments that are never flagged.
+- `dotnet_analyzer_configuration.pds0004.acronym_map` — semicolon-separated `Key:Value` corrections.
+
+```ini
+[*.cs]
+dotnet_analyzer_configuration.pds0004.allowed_words = Http;Xml;Json;Id;Sdk
+dotnet_analyzer_configuration.pds0004.acronym_map = Api:API;Ai:AI;Ui:UI;Sql:SQL;Url:URL
+```
+
+The code fix for `PDS0004` renames the identifier and all of its references across the solution.
+
+---
+
 ## Assembly name generation
 
-By default (`EnableAssemblyNameGeneration=true`), the SDK treats `RootNamespace` as the canonical public name: `AssemblyName` and `PackageId` both default to the fully evaluated `RootNamespace`. The defaults are applied during `Sdk.props` evaluation — before the Microsoft SDK computes `TargetName` and before the project body — so compilation, output paths, project references, restore, and packing all agree on the same identities. Set `EnableAssemblyNameGeneration=false` **before the SDK import** to opt out and fall back to standard .NET behaviour (`$(MSBuildProjectName)`).
+By default (`EnableAssemblyNameGeneration=true`), the SDK treats `RootNamespace` as the canonical public name: `AssemblyName` and `PackageId` both default to the fully evaluated `RootNamespace` — or, when suffix-stripping removed a segment of the logical project name, to the full logical project name so assemblies stay distinct. The defaults are applied during `Sdk.props` evaluation — before the Microsoft SDK computes `TargetName` and before the project body — so compilation, output paths, project references, restore, and packing all agree on the same identities. Set `EnableAssemblyNameGeneration=false` **before the SDK import** to opt out and fall back to standard .NET behaviour (`$(MSBuildProjectName)`).
 
 With the default enabled:
 
@@ -482,8 +512,12 @@ With the default enabled:
 | -- | -- | -- | -- |
 | `Api` | `Acme` | `Acme.Api` | `Acme.Api` |
 | `Acme.Api` | `Acme` | `Acme.Api` | `Acme.Api` (no double-prefix) |
-| `Core.Infrastructure` | `Acme` | `Acme.Infrastructure` | `Acme.Infrastructure` (`.Core` suffix stripped) |
+| `Core.Infrastructure` | `Acme` | `Acme.Infrastructure` | `Acme.Core.Infrastructure` (`.Core` stripped from the namespace only) |
+| `Shared` | `Acme` | `Acme` | `Acme.Shared` (full logical name, so it stays distinct) |
+| `ServiceDefaults` | `Acme` | `Acme` | `Acme.ServiceDefaults` (full logical name, so it stays distinct) |
 | `Acme` | `Acme` | `Acme` | `Acme` |
+
+Explicitly setting `<RootNamespace>` before the SDK import always wins: `AssemblyName`/`PackageId` follow that override instead of re-appending a stripped suffix.
 
 Test projects keep their detected suffix: `Api.UnitTests` → `AssemblyName`/`PackageId` = `Acme.Api.UnitTests`, while `RootNamespace` remains `Acme.Api`.
 

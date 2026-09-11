@@ -97,8 +97,9 @@ Key behavior:
 2. `RootNamespace` defaults to `PurviewLogicalProjectName`.
 3. Known suffixes are stripped from `RootNamespace`, including shared/shared-testing names and common segments like `Core`, `EF`, `Shared`, `ClientShared`, and `ServiceDefaults`.
 4. Test suffixes are removed from `RootNamespace`, so `Acme.Api.UnitTests` still maps back to `Acme.Api`.
-5. `AssemblyName` and `PackageId` default to the fully evaluated `RootNamespace` (the canonical default public name). Test/shared-testing projects keep their detected suffix in `AssemblyName`/`PackageId` so test assemblies stay distinct. Explicit `AssemblyName`/`PackageId` values always win.
+5. `AssemblyName` and `PackageId` default to the fully evaluated `RootNamespace` (the canonical default public name) — except when suffix-stripping removed a segment of the logical project name (e.g. `Shared` or `ServiceDefaults`), in which case they use the full `PurviewLogicalProjectName` so those assemblies/packages stay distinct from their parent. Test/shared-testing projects keep their detected suffix in `AssemblyName`/`PackageId` so test assemblies stay distinct. Explicit `AssemblyName`/`PackageId`/`RootNamespace` values always win.
 6. The naming defaults are applied during `Sdk.props` evaluation (before the Microsoft SDK computes `TargetName`), so the compiled output name always matches `AssemblyName`.
+7. The SDK ships `Purview.DotNetProjectSdk.Analyzers` and adds it as an `<Analyzer>` item to every C# project, so its rules (PDS0002 Extensions namespace, PDS0003 explicit types with target-typed `new()`, PDS0004 correct acronym capitalization) surface in both command-line builds and Visual Studio. The code-fix assembly ships beside it for IDE discovery. `PDS0004` exempts `Http`, `Xml`, `Json`, `Id`, and `Sdk` by default; customise via `dotnet_analyzer_configuration.pds0004.allowed_words` and `.acronym_map`.
 
 Do not hand-author alternate namespace conventions unless the repository explicitly opts out of the SDK defaults.
 

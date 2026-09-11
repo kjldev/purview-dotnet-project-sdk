@@ -107,7 +107,7 @@ public sealed class ProjectIdentityRulesTests
 	[Arguments("ServiceDefaults")]
 	[Arguments("ResourceIsolation.ServiceDefaults")]
 	[Arguments("Purview.Aspire.ResourceIsolation.ServiceDefaults")]
-	public async Task ProjectName_StartingWithNamespacePrefixTail_StripsOnlyLeadingDuplicateSegment(
+	public async Task NamespaceTailDedup_StripsRootNamespace_ButKeepsFullAssemblyIdentity(
 		string projectName,
 		CancellationToken cancellationToken
 	)
@@ -121,9 +121,12 @@ public sealed class ProjectIdentityRulesTests
 
 		var props = await h.GetPropertiesAsync(cancellationToken, "AssemblyName", "RootNamespace", "PackageId");
 
-		await Assert.That(props["AssemblyName"]).IsEqualTo("Purview.Aspire.ResourceIsolation");
+		// RootNamespace still strips the ServiceDefaults suffix (all three names map to the same
+		// namespace), but the assembly/package identity keeps the full logical project name so
+		// ServiceDefaults projects stay distinct from their parent.
+		await Assert.That(props["AssemblyName"]).IsEqualTo("Purview.Aspire.ResourceIsolation.ServiceDefaults");
 		await Assert.That(props["RootNamespace"]).IsEqualTo("Purview.Aspire.ResourceIsolation");
-		await Assert.That(props["PackageId"]).IsEqualTo("Purview.Aspire.ResourceIsolation");
+		await Assert.That(props["PackageId"]).IsEqualTo("Purview.Aspire.ResourceIsolation.ServiceDefaults");
 	}
 
 	[Test]
