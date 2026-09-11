@@ -253,6 +253,145 @@ public sealed class SdkPackageConsumptionTests
 		}
 	}
 
+	[Test]
+	[NotInParallel]
+	public async Task PackedSdk_ShipsAnalyzers_AndExposesThemToConsumerProject(CancellationToken cancellationToken)
+	{
+		var tempRoot = Path.Combine(Path.GetTempPath(), $"PurviewSdkAnalyzerDelivery-{Guid.NewGuid():N}");
+		var feedDirectory = Path.Combine(tempRoot, "feed");
+		var consumerDirectory = Path.Combine(tempRoot, "consumer");
+		var consumerSrcDirectory = Path.Combine(consumerDirectory, "src");
+
+		Directory.CreateDirectory(feedDirectory);
+		Directory.CreateDirectory(consumerDirectory);
+		Directory.CreateDirectory(consumerSrcDirectory);
+
+		try
+		{
+			var packageVersion = await PackSdkAsync(feedDirectory, cancellationToken);
+			await VerifyPackageContainsAnalyzersAsync(feedDirectory, packageVersion, cancellationToken);
+			await SetupConsumerProjectAsync(consumerDirectory, consumerSrcDirectory, cancellationToken);
+			await WriteConfigurationFilesAsync(
+				consumerDirectory,
+				consumerSrcDirectory,
+				feedDirectory,
+				packageVersion,
+				cancellationToken
+			);
+			await WritePds0003TriggerSourceAsync(consumerSrcDirectory, cancellationToken);
+			await VerifyAnalyzerItemExposedAsync(consumerDirectory, cancellationToken);
+			await VerifyPds0003WarningOnBuildAsync(consumerDirectory, cancellationToken);
+		}
+		finally
+		{
+			if (Directory.Exists(tempRoot))
+				Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	static async Task VerifyPackageContainsAnalyzersAsync(
+		string feedDirectory,
+		string packageVersion,
+		CancellationToken cancellationToken
+	)
+	{
+		var packagePath = Directory
+			.GetFiles(feedDirectory, $"Purview.DotNetProjectSdk.{packageVersion}.nupkg", SearchOption.TopDirectoryOnly)
+			.SingleOrDefault();
+
+		await Assert
+			.That(packagePath)
+			.IsNotNull()
+			.Because($"The package {packageVersion} was not found in the feed directory.");
+
+		using (var zip = await ZipFile.OpenReadAsync(packagePath!, cancellationToken))
+		{
+			var entries = zip.Entries.Select(entry => entry.FullName).ToList();
+			await Assert
+				.That(entries)
+				.Contains("analyzers/dotnet/cs/Purview.DotNetProjectSdk.Analyzers.dll")
+				.Because("The analyzer assembly must ship in the SDK package under analyzers/dotnet/cs.");
+			await Assert
+				.That(entries)
+				.Contains("analyzers/dotnet/cs/Purview.DotNetProjectSdk.CodeFixers.dll")
+				.Because("The code-fix assembly must ship beside the analyzer for IDE discovery.");
+		}
+	}
+
+	static async Task WritePds0003TriggerSourceAsync(string consumerSrcDirectory, CancellationToken cancellationToken)
+	{
+		var classPath = Path.Combine(consumerSrcDirectory, "Proof.LibTest", "Class1.cs");
+		await File.WriteAllTextAsync(
+			classPath,
+			"""
+			public class Class1
+			{
+				public void M()
+				{
+					var x = new object();
+					_ = x;
+				}
+			}
+			""",
+			cancellationToken
+		);
+	}
+
+	static async Task VerifyAnalyzerItemExposedAsync(string consumerDirectory, CancellationToken cancellationToken)
+	{
+		var nugetConfigPath = Path.Combine(consumerDirectory, "NuGet.Config");
+
+		var (code, stdOut, stdErr) = await RunProcessAsync(
+			"dotnet",
+			$"msbuild \"{Path.Combine("src", "Proof.LibTest", "Proof.LibTest.csproj")}\" -nologo -noconlog -p:RestoreConfigFile=\"{nugetConfigPath}\" -getItem:Analyzer -p:CentralPackageFloatingVersionsEnabled=true",
+			consumerDirectory,
+			cancellationToken
+		);
+		await Assert.That(code).IsEqualTo(0).Because(TestHelpers.GenerateError(stdOut, stdErr));
+
+		var evaluationJsonStart = stdOut.IndexOf('{', StringComparison.Ordinal);
+		await Assert.That(evaluationJsonStart >= 0).IsTrue();
+		var evaluationJson = stdOut[evaluationJsonStart..];
+
+		using var doc = JsonDocument.Parse(evaluationJson);
+		var analyzerPaths = doc
+			.RootElement.GetProperty("Items")
+			.GetProperty("Analyzer")
+			.EnumerateArray()
+			.Select(item => item.GetProperty("Identity").GetString())
+			.Where(path => !string.IsNullOrWhiteSpace(path))
+			.Select(path => Path.GetFullPath(path!))
+			.ToArray();
+
+		await Assert
+			.That(
+				analyzerPaths.Any(path =>
+					path.EndsWith("Purview.DotNetProjectSdk.Analyzers.dll", StringComparison.OrdinalIgnoreCase)
+				)
+			)
+			.IsTrue()
+			.Because(
+				$"The SDK analyzer must be exposed as an Analyzer item to the consumer project.{Environment.NewLine}Analyzers: {string.Join(", ", analyzerPaths)}"
+			);
+	}
+
+	static async Task VerifyPds0003WarningOnBuildAsync(string consumerDirectory, CancellationToken cancellationToken)
+	{
+		var nugetConfigPath = Path.Combine(consumerDirectory, "NuGet.Config");
+
+		var (code, stdOut, stdErr) = await RunProcessAsync(
+			"dotnet",
+			$"build \"{Path.Combine("src", "Proof.LibTest", "Proof.LibTest.csproj")}\" -nologo -p:RestoreConfigFile=\"{nugetConfigPath}\" -p:CentralPackageFloatingVersionsEnabled=true -p:NoWarn=NU1010",
+			consumerDirectory,
+			cancellationToken
+		);
+		await Assert.That(code).IsEqualTo(0).Because(TestHelpers.GenerateError(stdOut, stdErr));
+		await Assert
+			.That(stdOut + stdErr)
+			.Contains("PDS0003")
+			.Because("A shipped analyzer rule (PDS0003) must surface as a warning in the consumer build.");
+	}
+
 	static async Task<string> PackSdkAsync(string feedDirectory, CancellationToken cancellationToken)
 	{
 		var sdkProjectPath = Path.GetFullPath(Path.Combine(SdkPaths.SdkDirectory, "..", "DotNetProjectSdk.csproj"));
