@@ -1,7 +1,7 @@
 set quiet
 
 solution_file := "src/DotNetProjectSdk.slnx"
-build_configuration := "Release"
+build_configuration := "Debug"
 artifacts_folder := "./artifacts"
 
 pipeline_feed := "https://api.nuget.org/v3/index.json"

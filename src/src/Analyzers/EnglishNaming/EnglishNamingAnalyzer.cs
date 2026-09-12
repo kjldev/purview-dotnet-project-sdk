@@ -17,8 +17,9 @@ public sealed class EnglishNamingAnalyzer : DiagnosticAnalyzer
 		"Naming",
 		DiagnosticSeverity.Warning,
 		isEnabledByDefault: true,
-		description: "Acronyms such as 'Api' should be capitalized as 'API' for correct English, overriding .NET naming guidance. "
-			+ "Customize the checked words via dotnet_analyzer_configuration.pds0004.allowed_words and .acronym_map."
+		description: "Acronyms such as 'Api' should be capitalized as 'API' for correct English. "
+			+ "Well-known framework spellings (Sql, Guid, Uuid, Url, Dns, Http, Xml, ...) are exempt by default. "
+			+ "Customize via dotnet_analyzer_configuration.pds0004.allowed_words, .acronym_map, and .allowed_identifiers."
 	);
 
 	public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics => [Rule];
@@ -75,6 +76,12 @@ public sealed class EnglishNamingAnalyzer : DiagnosticAnalyzer
 
 		var corrected = EnglishNamingHelper.CorrectIdentifier(symbol.Name, config);
 		if (corrected is null || string.Equals(symbol.Name, corrected, StringComparison.Ordinal))
+		{
+			return;
+		}
+
+		// Names mandated by an interface or base class cannot be changed without breaking the contract.
+		if (EnglishNamingHelper.IsContractMember(symbol))
 		{
 			return;
 		}

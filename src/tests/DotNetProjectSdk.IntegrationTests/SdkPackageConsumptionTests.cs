@@ -501,10 +501,36 @@ public sealed class SdkPackageConsumptionTests
 
 		using (var zip = await ZipFile.OpenReadAsync(packagePath!, cancellationToken))
 		{
+			var editorConfigEntry = zip.Entries.Single(entry => entry.FullName == "Sdk/.editorconfig");
 			await Assert
-				.That(zip.Entries.Any(entry => entry.FullName == "Sdk/.editorconfig"))
-				.IsTrue()
+				.That(editorConfigEntry)
+				.IsNotNull()
 				.Because("The .editorconfig file is missing in the SDK package.");
+
+			await using var editorConfigStream = await editorConfigEntry!.OpenAsync(cancellationToken);
+			using var reader = new StreamReader(editorConfigStream);
+			var editorConfig = await reader.ReadToEndAsync(cancellationToken);
+
+			await Assert
+				.That(editorConfig)
+				.Contains("[**/Migrations/**.{cs,vb}]")
+				.Because("The packed .editorconfig must ship the EF Core Migrations section.");
+			await Assert
+				.That(editorConfig)
+				.Contains("generated_code = true")
+				.Because(
+					"Generated content (Migrations, .g.cs, Generated, obj/bin) must be treated as generated code."
+				);
+			await Assert
+				.That(editorConfig)
+				.Contains("[**/Extensions/**.{cs,vb}]")
+				.Because("The packed .editorconfig must ship the Extensions suppression section.");
+			await Assert
+				.That(editorConfig)
+				.Contains("dotnet_diagnostic.CA1724.severity = none")
+				.Because(
+					"The Extensions section must suppress namespace-conflict diagnostics so no pragmas are required."
+				);
 		}
 	}
 

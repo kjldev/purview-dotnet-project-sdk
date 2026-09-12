@@ -54,6 +54,12 @@ public sealed class EnglishNamingCodeFixProvider : CodeFixProvider
 				continue;
 			}
 
+			// Names mandated by an interface or base class cannot be renamed without breaking the contract.
+			if (EnglishNamingHelper.IsContractMember(symbol))
+			{
+				continue;
+			}
+
 			var corrected = EnglishNamingHelper.CorrectIdentifier(symbol.Name, config);
 			if (corrected is null || string.Equals(symbol.Name, corrected, StringComparison.Ordinal))
 			{
