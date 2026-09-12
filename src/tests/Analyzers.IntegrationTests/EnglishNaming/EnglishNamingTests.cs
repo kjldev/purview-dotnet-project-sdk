@@ -1,9 +1,11 @@
 using System.Collections.Immutable;
 using System.Composition;
+using System.Globalization;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CodeActions;
 using Microsoft.CodeAnalysis.CodeFixes;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
 using Microsoft.CodeAnalysis.Text;
 using Purview.DotNetProjectSdk.CodeFixers.EnglishNaming;
@@ -54,6 +56,10 @@ public sealed class EnglishNamingTests
 			class HttpClient { }
 			class JsonSerializer { }
 			class XmlReader { }
+			class SqlConnection { }
+			class GuidFactory { }
+			class UuidValue { }
+			class UrlBuilder { }
 			class Widget { string GetId() => ""; }
 			class SdkClient { }
 			""";
@@ -92,6 +98,172 @@ public sealed class EnglishNamingTests
 		var diagnostics = await GetDiagnosticsAsync(solution.GetDocument(document.Id)!, cancellationToken);
 
 		await Assert.That(diagnostics).IsEmpty();
+	}
+
+	[Test]
+	public async Task Analyzer_RespectsEditorConfig_AllowedIdentifiers(CancellationToken cancellationToken)
+	{
+		const string source = """
+			class MyApi { }
+			class MyApiServer { }
+			class ApiHelper { }
+			""";
+
+		using var workspace = new AdhocWorkspace();
+		var document = CreateDocument(
+			workspace,
+			source,
+			AnalyzerTestInfrastructure.NormalizeFakePath(@"C:\FakeProject\Test.cs")
+		);
+		var solution = document.Project.Solution.AddAnalyzerConfigDocument(
+			DocumentId.CreateNewId(document.Project.Id),
+			".editorconfig",
+			SourceText.From(
+				"is_root = true\n[*.cs]\ndotnet_analyzer_configuration.pds0004.allowed_identifiers = MyApi\n"
+			),
+			filePath: AnalyzerTestInfrastructure.NormalizeFakePath(@"C:\FakeProject\.editorconfig")
+		);
+
+		var diagnostics = await GetDiagnosticsAsync(solution.GetDocument(document.Id)!, cancellationToken);
+
+		// MyApi and its word-boundary prefixes are exempt; ApiHelper is still renamed.
+		await Assert.That(diagnostics).Count().IsEqualTo(1);
+		await Assert.That(diagnostics[0].Id).IsEqualTo(EnglishNamingAnalyzer.DiagnosticId);
+		await Assert
+			.That(diagnostics[0].GetMessage(CultureInfo.InvariantCulture))
+			.Contains("ApiHelper")
+			.Because(
+				$"Only ApiHelper should be flagged. Got: {string.Join(", ", diagnostics.Select(d => d.GetMessage(CultureInfo.InvariantCulture)))}"
+			);
+	}
+
+	[Test]
+	public async Task Analyzer_OverrideOfBaseMethod_DoesNotReportDiagnostic(CancellationToken cancellationToken)
+	{
+		const string source = """
+			class Base
+			{
+				public virtual void GetApi() { }
+			}
+
+			class Derived : Base
+			{
+				public override void GetApi() { }
+			}
+			""";
+
+		var diagnostics = await GetDiagnosticsAsync(source, cancellationToken);
+
+		// Only the virtual base declaration is flagged; the override name is contract-mandated.
+		await Assert.That(diagnostics).Count().IsEqualTo(1);
+	}
+
+	[Test]
+	public async Task Analyzer_ImplicitInterfaceImplementation_DoesNotReportDiagnostic(
+		CancellationToken cancellationToken
+	)
+	{
+		const string source = """
+			interface IThing
+			{
+				void GetApi();
+			}
+
+			class Impl : IThing
+			{
+				public void GetApi() { }
+			}
+			""";
+
+		var diagnostics = await GetDiagnosticsAsync(source, cancellationToken);
+
+		// Only the interface declaration is flagged; the implementation name is contract-mandated.
+		await Assert.That(diagnostics).Count().IsEqualTo(1);
+	}
+
+	[Test]
+	public async Task Analyzer_ExplicitInterfaceImplementation_DoesNotReportDiagnostic(
+		CancellationToken cancellationToken
+	)
+	{
+		const string source = """
+			interface IThing
+			{
+				void GetApi();
+			}
+
+			class Impl : IThing
+			{
+				void IThing.GetApi() { }
+			}
+			""";
+
+		var diagnostics = await GetDiagnosticsAsync(source, cancellationToken);
+
+		// The explicit implementation is contract-mandated; only the interface declaration is flagged.
+		await Assert.That(diagnostics).Count().IsEqualTo(1);
+	}
+
+	[Test]
+	public async Task Analyzer_PlainMethod_StillReportsDiagnostic(CancellationToken cancellationToken)
+	{
+		const string source = """
+			class C
+			{
+				public void GetApi() { }
+			}
+			""";
+
+		var diagnostics = await GetDiagnosticsAsync(source, cancellationToken);
+
+		await Assert.That(diagnostics).Count().IsEqualTo(1);
+		await Assert.That(diagnostics[0].Id).IsEqualTo(EnglishNamingAnalyzer.DiagnosticId);
+	}
+
+	[Test]
+	public async Task CodeFix_InterfaceImplementation_DoesNotOfferRename(CancellationToken cancellationToken)
+	{
+		const string source = """
+			interface IThing
+			{
+				void GetApi();
+			}
+
+			class Impl : IThing
+			{
+				public void GetApi() { }
+			}
+			""";
+
+		using var workspace = new AdhocWorkspace();
+		var document = CreateDocument(workspace, source);
+		var semanticModel = await document.GetSemanticModelAsync(cancellationToken);
+		var root = await document.GetSyntaxRootAsync(cancellationToken);
+		var implClass = root!.DescendantNodes().OfType<ClassDeclarationSyntax>().Single();
+		var implMethod = implClass.Members.OfType<MethodDeclarationSyntax>().Single();
+
+		var descriptor = new DiagnosticDescriptor(
+			EnglishNamingAnalyzer.DiagnosticId,
+			"Use correct acronym capitalization",
+			"Identifier '{0}' uses incorrect acronym capitalization; prefer '{1}'",
+			"Naming",
+			DiagnosticSeverity.Warning,
+			isEnabledByDefault: true
+		);
+		var diagnostic = Diagnostic.Create(
+			descriptor,
+			implMethod.Identifier.GetLocation(),
+			"Impl.GetApi",
+			"Impl.GetAPI"
+		);
+
+		var provider = new EnglishNamingCodeFixProvider();
+		var actions = new List<CodeAction>();
+		var context = new CodeFixContext(document, diagnostic, (action, _) => actions.Add(action), cancellationToken);
+
+		await provider.RegisterCodeFixesAsync(context);
+
+		await Assert.That(actions).IsEmpty();
 	}
 
 	[Test]

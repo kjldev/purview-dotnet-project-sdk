@@ -468,7 +468,29 @@ Examples:
 | `Extensions/TopLevel.cs` | *(global namespace)* |
 
 To avoid conflicting guidance, `IDE0130` is suppressed for files in this root `Extensions/` scope.
+The shipped `.editorconfig` also suppresses the namespace-conflict diagnostics this convention can
+trigger (`CA1724`, `CS0436`, `CS1591`, `IDE0005`), so extension files never need `#pragma` suppressions.
 Outside this scope, normal `IDE0130` behaviour remains unchanged.
+
+A code refactoring (`Split extensions class into one class per receiver type`) is offered when a
+static extensions class targets multiple receiver types. It splits the class into one
+`<ReceiverType>Extensions` class per receiver — for a generic `this TBuilder where TBuilder : IHostApplicationBuilder`
+receiver that becomes `HostApplicationBuilderExtensions` — and places each new file under
+`Extensions/<receiver namespace>/` so the namespace convention above stays satisfied. When a
+`<ReceiverType>Extensions` class already exists in the receiver's namespace, the receiver's methods are
+merged into it instead of creating a duplicate file.
+
+A second refactoring (`Move extensions class to conventional location`) is offered when a static
+extensions class targets a single receiver type but is not already at its conventional location (or is
+at that location but not conventionally named). It re-paths the file to
+`Extensions/<receiver namespace>/<Type>Extensions.cs` and renames the class to the receiver-derived
+name (e.g. an `IServiceCollection` extension becomes `ServiceCollectionExtensions` and moves to
+`Microsoft.Extensions.DependencyInjection`). When a `<Type>Extensions` class already exists in the
+receiver's namespace it is merged into that class instead of creating a duplicate — every member from
+both classes (constants, private helpers, XML docs) is preserved, only members with a matching
+signature are skipped. The namespace is fixed, a `using` for the previous namespace is added to the
+moved file, and a `using` for the new namespace plus the renamed type name are applied to every other
+document that references the type, so the move compiles everywhere.
 
 ---
 
@@ -485,17 +507,32 @@ command-line builds and Visual Studio.
 | `PDS0003` | Style | Warning | Prefer an explicit type with target-typed `new()` over `var` |
 | `PDS0004` | Naming | Warning | Use correct acronym capitalization (`Api` → `API`) |
 
-`PDS0004` deliberately overrides .NET's naming guidance (which recommends spellings like `Api`, `Xml`,
-and `Http`). By default the acronym-like segments `Http`, `Xml`, `Json`, `Id`, and `Sdk` are exempt.
-The lists are customisable per repo in `.editorconfig` (both options replace the shipped default when set):
+`PDS0004` follows .NET naming guidance for well-known framework spellings (`Sql`, `Guid`, `Uuid`, `Url`,
+`Dns`, `Http`, `Xml`, `DbContext`, ...) while still enforcing uppercase for acronyms such as `Api` → `API`,
+`Ai` → `AI`, `Cpu` → `CPU`, `Gpu` → `GPU`, `Cli` → `CLI`, `Gui` → `GUI`, `Ram` → `RAM`, and
+`Ssh` → `SSH`. By default the acronym-like segments `Http`, `Xml`, `Json`, `Id`, `Sdk`, `Sql`, `Uuid`,
+`Url`, `Dns`, `Tcp`, `Udp`, `Csv`, `Pdf`, `Html`, `Css`, `Ftp`, `Smtp`, `Imap`, and `Db` are exempt —
+`Db` is deliberately exempt so the prevalent EF Core/ADO.NET spellings (`DbContext`, `DbConnection`,
+`DbSet`, `CreateDbContext`) are never flagged; a repo that prefers `DB` can re-enable it via
+`acronym_map = Db:DB`. All options are customisable per repo, project, or folder via `.editorconfig` and
+**merge with the shipped defaults — config entries override them** (so you can opt into `Sql` → `SQL`
+or opt out of `Cli` → `CLI` without re-declaring every default):
 
 - `dotnet_analyzer_configuration.pds0004.allowed_words` — semicolon-separated segments that are never flagged.
 - `dotnet_analyzer_configuration.pds0004.acronym_map` — semicolon-separated `Key:Value` corrections.
+- `dotnet_analyzer_configuration.pds0004.allowed_identifiers` — semicolon-separated whole identifiers that
+  are never flagged. Matched in the order listed (first match wins) by exact name or word-boundary prefix,
+  so a brand name like `CosmosDb` also covers `CosmosDbServer`/`CosmosDbContext`.
+
+Members whose names are mandated by a contract — interface implementations (implicit or explicit) and
+base-class overrides — are never renamed, since doing so would break the contract.
 
 ```ini
 [*.cs]
-dotnet_analyzer_configuration.pds0004.allowed_words = Http;Xml;Json;Id;Sdk
-dotnet_analyzer_configuration.pds0004.acronym_map = Api:API;Ai:AI;Ui:UI;Sql:SQL;Url:URL
+# Optional overrides; everything not mentioned keeps its shipped default.
+dotnet_analyzer_configuration.pds0004.allowed_words = Cli
+dotnet_analyzer_configuration.pds0004.acronym_map = Db:DB
+dotnet_analyzer_configuration.pds0004.allowed_identifiers = ICosmosDBService;CosmosDb;GitHub;YouTube
 ```
 
 The code fix for `PDS0004` renames the identifier and all of its references across the solution.
